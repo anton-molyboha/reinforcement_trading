@@ -1,0 +1,3 @@
+[submodule "dependencies/BristolStockExchange"]
+	path = dependencies/BristolStockExchange
+	url = https://github.com/anton-molyboha/BristolStockExchange.git
