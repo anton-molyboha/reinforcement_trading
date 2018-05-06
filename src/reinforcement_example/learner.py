@@ -14,7 +14,7 @@ def make_model(inputs, outputs):
     return model
 
 
-def make_model_rlu(inputs, outputs):
+def make_model_elu(inputs, outputs):
     input_layer = keras.layers.Input(shape=(inputs,))
     layer1 = keras.layers.Dense((inputs + outputs)**2, activation='elu')
     layer2 = keras.layers.Dense(outputs, activation='elu')
@@ -116,7 +116,7 @@ class SimpleLearner(AbstractLearner):
 
 
 class MCLearner(AbstractLearner):
-    def __init__(self, state_dim, num_actions, reward_scale=1.0, model_factory=make_model_rlu):
+    def __init__(self, state_dim, num_actions, reward_scale=1.0, model_factory=make_model_elu):
         self.state_dim = state_dim
         self.num_actions = num_actions
         self.reward_scale = reward_scale
