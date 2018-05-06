@@ -31,14 +31,14 @@ class ScaledModel(object):
         self.xscale = xscale
         self.yscale = yscale
 
-    def fit(self, X, Y):
+    def fit(self, X, Y, **kwargs):
         rX = X / self.xscale[np.newaxis, :] if self.xscale is not None else X
         rY = Y / self.yscale if self.yscale is not None else Y
-        self.model.fit(rX, rY)
+        self.model.fit(rX, rY, **kwargs)
 
-    def predict(self, X):
+    def predict(self, X, **kwargs):
         rX = X / self.xscale[np.newaxis, :] if self.xscale is not None else X
-        res = self.model.predict(rX)
+        res = self.model.predict(rX, **kwargs)
         return res * self.yscale if self.yscale is not None else res
 
 
