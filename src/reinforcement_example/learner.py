@@ -181,6 +181,96 @@ class MCLearner(AbstractLearner):
         return
 
 
+class TDLearner(AbstractLearner):
+    def __init__(self, state_dim, num_actions, reward_scale=1.0, model_factory=make_model_elu):
+        self.state_dim = state_dim
+        self.num_actions = num_actions
+        self.reward_scale = reward_scale
+        self.value_model = [ScaledModel(model_factory(state_dim, 1), yscale=reward_scale) for i in range(num_actions)]
+        #self.policy = make_model(state_dim, num_actions)
+        self.policy = ValueToPolicy(self.value_model, scale=self.reward_scale)
+        self.histories = []
+        self.history = []
+        # Helper arrays for faster training
+        self.states = np.empty((0, self.state_dim))
+        self.actions = np.empty(0, dtype=np.int)
+        self.rewards = np.empty(0)
+        self.logprobs = np.empty(0)
+        self.ranges = np.empty((0, 2), dtype=np.int)
+        self.actinds = [np.empty(0, dtype=np.int) for i in range(self.num_actions)]
+
+    def move(self, state):
+        probs = logodds_to_probs(self.policy.predict(state[np.newaxis, :])[0])
+        choice = np.searchsorted(np.cumsum(probs), np.random.rand())
+        self.last_action_prob = probs[choice]
+        return choice
+
+    def _state_value(self, state):
+        action_values = np.array([model.predict(state[np.newaxis, :])[0, 0] for model in self.value_model])
+        probs = logodds_to_probs(self.policy.predict(state[np.newaxis, :])[0, :])
+        return np.dot(probs, action_values)
+
+    def learn(self, state, action, reward, next_state, value_proxy):
+        winds = [0] #weights_to_inds(np.array([self.last_action_prob]))
+        #         self.value_model[action].fit(state[np.newaxis, :][winds, :],
+        #                                      np.array([[reward + self._state_value(next_state)]])[winds],
+        #                                      verbose=False)
+        self.history.append((np.array(state), action, reward, self.last_action_prob))
+
+    def learn_last(self, state, action, reward):
+        winds = [0] #weights_to_inds(np.array([self.last_action_prob]))
+        #         self.value_model[action].fit(state[np.newaxis, :][winds, :],
+        #                                      np.array([[reward]])[winds],
+        #                                      verbose=False)
+        self.history.append((np.array(state), action, reward, self.last_action_prob))
+        self.histories.append(self.history)
+        self.history = []
+        self._update_value_model()
+
+    def _update_value_model(self):
+        # Update data structures
+        dsize = len(self.states)
+        for i in range(len(self.ranges), len(self.histories)):
+            last_states, last_actions, last_rewards, last_actionprob = zip(*self.histories[i][::-1])
+            self.ranges = np.concatenate([self.ranges, np.array([[dsize, dsize + len(last_states)]])])
+            dsize += len(last_states)
+            self.states = np.concatenate([self.states, np.array(last_states)], axis=0)
+            self.actions = np.concatenate([self.actions, np.array(last_actions, dtype=np.int)])
+            self.rewards = np.concatenate([self.rewards, last_rewards])
+            #self.logprobs = np.concatenate([self.logprobs, [0], np.log(last_actionprob)[:-1]])
+            #self.actinds = [np.arange(len(self.actions))[self.actions == i] for i in range(self.num_actions)]
+            self.actinds = [np.concatenate([self.actinds[i],
+                                            np.arange(dsize - len(last_states), dsize)
+                                            [self.actions[dsize - len(last_states):dsize] == i]])
+                            for i in range(self.num_actions)]
+        # Training
+        policy_probs = logodds_to_probs(self.policy.predict(self.states))
+        #policy_logprobs = np.log(policy_probs[np.arange(dsize), self.actions])
+        #policy_cumlogprobs = np.zeros(dsize)
+        #for start, end in self.ranges:
+        #    policy_cumlogprobs[start + 1:end] = np.cumsum(policy_logprobs[start:end - 1])
+        predicted_state_action_value = np.array([model.predict(self.states)[:, 0] for model in self.value_model]).T
+        predicted_state_value = np.sum(policy_probs * predicted_state_action_value, axis=1)
+        response = np.empty(self.rewards.shape)
+        response[:] = self.rewards
+        for start, end in self.ranges:
+            response[start + 1:end] += predicted_state_value[start:end - 1]
+        predicted_value = predicted_state_action_value[np.arange(dsize), self.actions]
+        # weights = np.exp(policy_logprobs - self.logprobs)
+        for action in range(self.num_actions):
+            inds = self.actinds[action]  #[weights_to_inds(weights[self.actinds[action]])]
+            if len(inds) > 0:
+                self.value_model[action].fit(self.states[inds, :], response[inds],
+                                             epochs=10#,
+                                             #callbacks=[keras.callbacks.EarlyStopping(monitor='loss', patience=2)]
+                                             )
+        # Policy scale
+        #mse = np.dot(weights, (predicted_value - response) ** 2) / np.sum(weights)
+        #self.policy.set_scale(self.reward_scale / len(self.histories) + np.sqrt(mse))
+        self.policy.set_scale(self.reward_scale / np.sqrt(len(self.histories)))
+        return
+
+
 # Play the game
 def train_play(game, learner):
     history = []
