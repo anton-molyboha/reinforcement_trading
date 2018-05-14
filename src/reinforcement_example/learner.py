@@ -25,6 +25,42 @@ def make_model_elu(inputs, outputs):
     return model
 
 
+class KernelModel(object):
+    def __init__(self, xscale):
+        self.xscale = xscale
+        self.reset()
+
+    def reset(self):
+        self.X = np.empty((0, len(self.xscale)))
+        self.Y = np.empty(0)
+
+    def fit(self, X, Y, **kwargs):
+        self.X = X / self.xscale[np.newaxis, :]
+        self.Y = Y.copy()
+
+    def predict(self, X, **kwargs):
+        if len(self.X) == 0:
+            return np.zeros((len(X), 1))
+        if 'batch_size' in kwargs:
+            batch_size = kwargs['batch_size']
+        else:
+            batch_size = 32
+        X = X / self.xscale[np.newaxis, :]
+
+        def predict_batch(X):
+            dists = (np.sum(X ** 2, axis=1)[:, np.newaxis] +
+                     np.sum(self.X ** 2, axis=1)[np.newaxis, :] -
+                     2 * np.dot(X, self.X.T))
+            weights = np.exp(-(dists - np.min(dists, axis=1)[:, np.newaxis]) / 2)
+            return (np.dot(weights, self.Y) / np.sum(weights, axis=1))
+
+        res = np.empty(len(X))
+        for start in range(0, len(X), batch_size):
+            end = min(start + batch_size, len(X))
+            res[start:end] = predict_batch(X[start:end])
+        return res[:, np.newaxis]
+
+
 class ScaledModel(object):
     def __init__(self, model, xscale=None, yscale=None):
         self.model = model
